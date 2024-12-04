@@ -1,0 +1,130 @@
+---
+title: "Exercise 3"
+author: "Jeenat Mehareen"
+date: "2024-12-03"
+output: md_document
+---
+
+```{r setup, include=FALSE}
+library(tidyr)
+library(ggplot2)
+library(gapminder)
+library(purrr)
+library(broom)
+library(dplyr)
+library(knitr)
+```
+
+# Objective of the data analysis
+
+I will be performing data analysis on the gapminder dataset, where I'll be analyzing how GDP per capita has changed over time for each continent. I will first run a linear regression model where GDP per capita is my dependent variable and year is independent variable. As my focus is on growth of continents over time, not their initial value at 1950, I would not interpret the intercept term rigorously. 
+
+But before doing so, I want to check whether the data is positively skewed as GDP per capita historically is. If it is skewed, I will log transform the variable and then perform the linear regression. 
+
+```{r}
+# Cleaning up gapminder
+gap <- gapminder %>%
+  as_tibble()
+
+
+# checking for skewness
+ggplot(gap, aes(x = gdpPercap)) + 
+  geom_histogram(bins = 30, fill = "skyblue", color = "black", alpha = 0.7) +
+  labs(title = "Histogram of GDP per Capita", x = "GDP per Capita", y = "Count")
+
+```
+As the graph showed positive skewness, I will log-transform GDP per capita and fit a regression model. The slope in the log-transformed model represents the change in the logarithm of GDP per capita for each year. For the purpose of interpretation, I have transformed the slope of the regression model as the percentage change in GDP per capita over time using the formula Percentage change=$\left( \exp(\text{slope}) - 1 \right) \times 100$
+
+This will make it easy to understand at what rate GDP per capita of each continent is growing. 
+
+
+```{r}
+# Log-transform the GDP per capita
+gap <- gap %>%
+  mutate(log_gdpPercap = log(gdpPercap))
+
+
+# Grouping data by continent, fitting a linear model on log-transformed GDP per capita
+continent_models_log <- gap %>%
+  group_by(continent) %>%
+  nest() %>%
+  mutate(
+    model = map(data, ~ lm(log_gdpPercap ~ year, data = .))  # Use log-transformed GDP per capita
+  )
+
+
+# Extracting the coefficients from the models
+coefficients_log <- continent_models_log %>%
+  mutate(coefficients = map(model, broom::tidy)) %>%
+  select(continent, coefficients) %>%
+  unnest(coefficients)
+
+#Printing the intermediate table #1
+print(coefficients_log)
+
+# Filtering for only the slope (exclude intercept), then pivot wider
+coeff_table_log <- coefficients_log %>%
+  filter(term == "year") %>%  # Only keep rows where the term is "year"
+  pivot_wider(names_from = term, values_from = estimate) %>%
+  rename(slope = year)  # Rename the slope column for clarity
+
+
+# Adding percentage change based on slope (column) to the same table 
+coeff_table_log <- coeff_table_log %>%
+  mutate(
+    percentage_change = (exp(slope) - 1) * 100  
+  )
+
+#Printing the intermediate table #2
+print(coeff_table_log)
+
+
+# I want to round up all numeric values of the table to three decimal places
+final_table_clean <- coeff_table_log %>%
+  mutate(
+    std.error = round(std.error, 3),
+    statistic = round(statistic, 3),
+    p.value = round(p.value, 3),
+    slope = round(slope, 3),
+    percentage_change = round(percentage_change, 3)
+  )
+
+# I am also renaming columns for clarity
+final_table_clean <- final_table_clean %>%
+  rename(
+    "Continent" = continent,
+    "Standard Error" = std.error,
+    "Statistic" = statistic,
+    "P-value" = p.value,
+    "Slope" = slope,
+    "Percentage Change" = percentage_change
+  )
+
+# Printing the final clean table 
+kable(final_table_clean, caption = "GDP per Capita Growth by Continent", format = "markdown")
+```
+
+
+
+```{r}
+# Visualizing log-transformed GDP per capita growth over time by continent
+graph_exercise3 <-gap %>%
+  ggplot(aes(x = year, y = log_gdpPercap, color = continent)) +
+  geom_point(alpha = 0.6) +  # Raw data points
+  geom_smooth(method = "lm", se = FALSE, size = 1.2) +  # Linear trend lines
+  labs(
+    title = "Log-transformed GDP per Capita Growth Over Time by Continent",
+    x = "Year",
+    y = "Log of GDP per Capita",
+    color = "Continent"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+
+# plot
+graph_exercise3
+
+```
+
+The results show that for all continents GDP per capita is increasing since 1950. However, the growth rate is the maximum for Europe: with a  2.5% growth rate per year in GDP per capita, where as Asia ranks the second, with a growth rate of 2.48% in GDP per capita per year, Americas and Oceania ranks in between and Africa ranks at the bottom with GDP per capita growth at 0.85% per year. 
